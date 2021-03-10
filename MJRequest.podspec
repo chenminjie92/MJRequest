@@ -18,10 +18,11 @@ Pod::Spec.new do |spec|
   spec.description       = <<-DESC
                             基础请求
                             DESC
-  spec.homepage          = "git"
+  spec.license          = { :type => 'MIT', :file => 'LICENSE' }
+  spec.homepage          = 'https://github.com/chenminjie92/MJRequest'
   spec.author            = { "chenminjie" => "chenminjie92@126.com" }
 
-  spec.source            = { :git => "", :tag => "#{spec.version}" }
+  spec.source            = { :git => "https://github.com/chenminjie92/MJRequest.git", :tag => "#{spec.version}" }
   spec.platform          = :ios, "10.0"
   spec.static_framework  = true
 
