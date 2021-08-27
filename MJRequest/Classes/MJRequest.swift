@@ -8,39 +8,43 @@
 import Foundation
 import Moya
 
+
 open class MJRequest: NSObject {
     
-    public enum Encoding {
-        /// 多数情况使用该枚举
-        /// 对 `GET`, `HEAD` and `DELETE` 的query stirng encode，其他HTTPMethod 对HTTPBody encode
-        /// POST情况下 Content-Type=`application/x-www-form-urlencoded; charset=utf-8`
-        case urlEncoding
-        /// post请求，在body需要序列化json的时候， 使用该枚举
-        /// Content-Type=`application/json`
+    typealias ParameterEncoding = Moya.URLEncoding
+    
+    public enum RequestUrlEncoding {
+        case queryString
+        case httpBody
         case jsonEncoding
+        
+        var encoding: ParameterEncoding {
+            switch self {
+            case .queryString:
+                return .queryString
+            case .httpBody:
+                return .httpBody
+            case .jsonEncoding:
+                return .httpBody
+            }
+        }
     }
     
     private var privatePath: String = ""
     private var privateHost: String = ""
     private var privateMethod: Moya.Method = .post
-    private var privateHeaders: [String: String]?
-    private var privateEncoding: Encoding = .urlEncoding
+    private var privateHeaders: [String: String]? = MJRequestManager.config?.normalHeader
+    private var privateEncoding: RequestUrlEncoding =  .queryString
     private var privateParameters: [String: Any]?
     private var privateFormData: [MJUploadFile]?
+    private var privateData: Data? = nil
     
     
     private lazy var provider = {
-        return MoyaProvider<MJRequest>(plugins: MJRequestManager.plugins)
+       return MoyaProvider<MJRequest>(plugins: MJRequestManager.plugins)
     }()
     
-    /// 资源上传
-    /// - Parameters:
-    ///   - host: host
-    ///   - path: 路径
-    ///   - formData: 资源
-    ///   - parameters: 参数
-    ///   - header: 头部
-    public init(host: String, path: String, formData: [MJUploadFile], parameters: [String: Any]?,header: [String: String]? = MJRequestManager.config?.normalHeader) {
+    public init(host: String, path: String, formData: [MJUploadFile], parameters: [String: Any]?,header: [String: String]? = nil) {
         privateHost = host
         privatePath = path
         privateFormData = formData
@@ -54,29 +58,43 @@ open class MJRequest: NSObject {
     ///   - method: 请求方式
     ///   - host: host
     ///   - path: 路径
-    ///   - parameters: 参数
-    ///   - header: 头部
+    ///   - parameters: 请求参数
+    ///   - data: 请求参数 优先级最高
+    ///   - header: 请求头
     ///   - encoding: 编码方式
-    public init(method: Moya.Method = .post, host: String, path: String, parameters: [String: Any]?, header: [String: String]? = nil, encoding: Encoding = .urlEncoding) {
+    public init(method: Moya.Method = .post, host: String, path: String, parameters: [String: Any]?,data: Data? = nil, header: [String: String]? = nil, encoding: RequestUrlEncoding =  .queryString) {
+        super.init()
         privateMethod = method
         privateHost = host
         privatePath = path
+        privateData = data
         privateParameters = parameters
-        privateHeaders = header
-        if encoding == .jsonEncoding {
-            if privateHeaders == nil {
-                privateHeaders = [:]
+        privateHeaders = header ?? MJRequestManager.config?.normalHeader
+        if encoding == .jsonEncoding, let _parameters = parameters {
+            if let jsonData = jsonToData(jsonDic: _parameters) {
+                privateData = jsonData
             }
-            privateHeaders?["Content-type"] = "application/json"
         }
         privateEncoding = encoding
     }
     
+    public func execute<T: Codable>(result: T.Type, completion:@escaping ((_ result: T?, _ error: MJResponseError?) -> Void)) {
+        
+        provider.request(self, callbackQueue: nil, progress: nil) { (_result) in
+            switch _result {
+            case let .success(response):
+                do {
+                    let model = try response.decodeJSON(from: result.self)
+                    completion(model,nil)
+                } catch let error {
+                    completion(nil,(error as! MJResponseError))
+                }
+            case let .failure(error):
+                completion(nil,MJResponseError.http(error.errorCode, error.errorDescription ?? "未知"))
+            }
+        }
+    }
     
-    /// 开始请求
-    /// - Parameters:
-    ///   - result: 结果数据类型
-    ///   - completion: 结果
     public func request<T: Codable>(result: T.Type, completion:@escaping ((_ result: MJResult<T?, MJResponseError>) -> Void)) {
         
         provider.request(self, callbackQueue: nil, progress: nil) { (_result) in
@@ -106,7 +124,7 @@ extension MJRequest: TargetType {
     
     /// 接口域名
     public var baseURL: URL {
-        return URL(string:  "\(MJRequestManager.config?.agreement ?? "https")://\(privateHost)\(MJRequestManager.config?.domainDot ?? "")")!
+        return URL(string:  "\(MJRequestManager.config?.agreement ?? "https")://\(privateHost)\(MJRequestManager.config?.domainDot ?? "")" )!
     }
     
     /// 请求路径
@@ -121,6 +139,9 @@ extension MJRequest: TargetType {
     
     //header信息
     public var headers: [String: String]? {
+        if privateEncoding == .jsonEncoding {
+            privateHeaders?["Content-type"] = "application/json"
+        }
         return privateHeaders
     }
     
@@ -131,12 +152,17 @@ extension MJRequest: TargetType {
     
     /// 请求任务
     public var task: Task {
+        /// 自定义请求
+        if let _privateData = privateData  {
+            return .requestData(_privateData)
+        }
         /// 资源上传
         if let files = privateFormData, files.count > 0 {
             var datas: [MultipartFormData] = []
             for file in files {
                 switch file {
                 case let .image(data, paramName, fileName, mimeType):
+                    print(data.base64EncodedString())
                     let _data = MultipartFormData(provider: .data(data), name: paramName, fileName: fileName, mimeType: mimeType)
                     datas.append(_data)
                 case let .media(url, paramName, fileName):
@@ -154,24 +180,15 @@ extension MJRequest: TargetType {
             return .requestPlain
         }
         if method == .get {
-            return .requestParameters(parameters: parameters, encoding: URLEncoding.queryString)
+            return .requestParameters(parameters: parameters, encoding: privateEncoding.encoding)
         } else {
-            if privateEncoding == .jsonEncoding {
-                if let jsonData = jsonToData(jsonDic: parameters) {
-                    return .requestData(jsonData)
-                }
-                else {
-                    return .requestPlain
-                }
-            }
-            return .requestParameters(parameters: parameters, encoding: URLEncoding.httpBody)
+            return .requestParameters(parameters: parameters, encoding: privateEncoding.encoding)
         }
     }
     
     
     private func jsonToData(jsonDic: [String: Any]) -> Data? {
         if (!JSONSerialization.isValidJSONObject(jsonDic)) {
-            debugPrint("is not a valid json object")
             return nil
         }
         let data = try? JSONSerialization.data(withJSONObject: jsonDic, options: [])
