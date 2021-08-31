@@ -13,6 +13,13 @@ open class MJRequest: NSObject {
     
     typealias ParameterEncoding = Moya.URLEncoding
     
+    public enum RequestUrl {
+        /// 完整的url
+        case url(url: String)
+        /// 拼接base的url
+        case baseUrl(host: String, path: String)
+    }
+    
     public enum RequestUrlEncoding {
         case queryString
         case httpBody
@@ -30,8 +37,7 @@ open class MJRequest: NSObject {
         }
     }
     
-    private var privatePath: String = ""
-    private var privateHost: String = ""
+    private var privateUrl: RequestUrl = .baseUrl(host: "", path: "")
     private var privateMethod: Moya.Method = .post
     private var privateHeaders: [String: String]? = MJRequestManager.config?.normalHeader
     private var privateEncoding: RequestUrlEncoding =  .queryString
@@ -44,9 +50,8 @@ open class MJRequest: NSObject {
        return MoyaProvider<MJRequest>(plugins: MJRequestManager.plugins)
     }()
     
-    public init(host: String, path: String, formData: [MJUploadFile], parameters: [String: Any]?,header: [String: String]? = nil) {
-        privateHost = host
-        privatePath = path
+    public init(url:RequestUrl, formData: [MJUploadFile], parameters: [String: Any]?,header: [String: String]? = nil) {
+        privateUrl = url
         privateFormData = formData
         privateParameters = parameters
         privateHeaders = header
@@ -56,17 +61,15 @@ open class MJRequest: NSObject {
     /// 普通请求
     /// - Parameters:
     ///   - method: 请求方式
-    ///   - host: host
-    ///   - path: 路径
+    ///   - url: 请求的url
     ///   - parameters: 请求参数
     ///   - data: 请求参数 优先级最高
     ///   - header: 请求头
     ///   - encoding: 编码方式
-    public init(method: Moya.Method = .post, host: String, path: String, parameters: [String: Any]?,data: Data? = nil, header: [String: String]? = nil, encoding: RequestUrlEncoding =  .queryString) {
+    public init(method: Moya.Method = .post, url:RequestUrl, parameters: [String: Any]?,data: Data? = nil, header: [String: String]? = nil, encoding: RequestUrlEncoding =  .queryString) {
         super.init()
         privateMethod = method
-        privateHost = host
-        privatePath = path
+        privateUrl = url
         privateData = data
         privateParameters = parameters
         privateHeaders = header ?? MJRequestManager.config?.normalHeader
@@ -124,12 +127,22 @@ extension MJRequest: TargetType {
     
     /// 接口域名
     public var baseURL: URL {
-        return URL(string:  "\(MJRequestManager.config?.agreement ?? "https")://\(privateHost)\(MJRequestManager.config?.domainDot ?? "")" )!
+        switch privateUrl {
+        case .url(let url):
+            return URL(string: url)!
+        case .baseUrl(let host, _):
+            return URL(string: "\(MJRequestManager.config?.agreement ?? "https")://\(host)\(MJRequestManager.config?.domainDot ?? "")" )!
+        }
     }
     
     /// 请求路径
     public var path: String {
-        return privatePath
+        switch privateUrl {
+        case .baseUrl(_, let path):
+            return path
+        default:
+            return ""
+        }
     }
     
     /// 请求方式

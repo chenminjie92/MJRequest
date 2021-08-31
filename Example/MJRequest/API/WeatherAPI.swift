@@ -24,7 +24,7 @@ struct WeatherAPI {
         parameters["page"] = page
         parameters["type"] = type
         parameters["count"] = count
-        let req = PublicRequest(method: .get, host: "api.apiopen.top", path: path, parameters: parameters)
+        let req = PublicRequest(method: .get, url: .baseUrl(host: "api.apiopen.top", path: path), parameters: parameters)
         req.requestWithModel(model: [JokeVO].self, completion: completion)
     }
 }
